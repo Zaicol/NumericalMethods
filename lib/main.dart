@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
-import 'lr2.dart';
+import 'lab2_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'output_page.dart';
 
 void main() {
   runApp(const NumApp());
@@ -48,7 +49,14 @@ class _NumAppState extends State<NumApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Метод Якоби',
-      darkTheme: ThemeData.dark(), // Dark theme
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        bottomNavigationBarTheme: BottomNavigationBarThemeData(
+          backgroundColor: Colors.black,
+          selectedItemColor: Colors.cyanAccent,
+          unselectedItemColor: Colors.grey,
+        ),
+      ), // Dark theme
       themeMode: _themeMode, // Light, Dark, or System theme
       home: MainScreen(
         onThemeChanged: _toggleTheme,
@@ -73,6 +81,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   late List<Widget> _pages;
+  final GlobalKey<OutputPageState> _outPageKey = GlobalKey<OutputPageState>();
 
   @override
   void initState() {
@@ -80,7 +89,8 @@ class _MainScreenState extends State<MainScreen> {
     // Initialize _pages inside initState, where 'widget' can be accessed
     _pages = [
       JacobiScreen(),
-      FiniteElementScreen(),
+      FiniteElementScreen(outputPageKey: _outPageKey,),
+      OutputPage(key: _outPageKey),
       SettingsScreen(
         onThemeChanged: widget.onThemeChanged,
         currentThemeMode: widget.currentThemeMode,
@@ -112,6 +122,10 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.science_outlined),
             label: 'Lab 2',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.output),
+            label: 'Output'
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
@@ -161,21 +175,20 @@ class _JacobiScreenState extends State<JacobiScreen> {
     int n = A.length;
 
     List<double> dInv = List.generate(n, (i) => 1 / A[i][i]);
-    List<List<double>> R = List.generate(n, (i) => List.generate(n, (j) => i != j ? A[i][j] : 0.0));
+    List<List<double>> R = List.generate(
+        n, (i) => List.generate(n, (j) => i != j ? A[i][j] : 0.0));
 
-    List<List<double>> B = List.generate(n, (i) => List.generate(n, (j) => -dInv[i] * R[i][j]));
+    List<List<double>> B =
+        List.generate(n, (i) => List.generate(n, (j) => -dInv[i] * R[i][j]));
 
     List<double> d = List.generate(n, (i) => dInv[i] * b[i]);
 
-    return {
-      'B': B,
-      'd': d
-    };
+    return {'B': B, 'd': d};
   }
 
-  List<dynamic> jacobiMethodCalc(List<List<double>> A, List<double> b, List<List<double>> B, List<double> d,
+  List<dynamic> jacobiMethodCalc(List<List<double>> A, List<double> b,
+      List<List<double>> B, List<double> d,
       {double tol = 0, int maxIterations = 1000}) {
-
     int n = B.length;
     List<double> x = List.filled(n, 0.0);
     List<double> xNext = List.filled(n, 0.0);
@@ -206,7 +219,8 @@ class _JacobiScreenState extends State<JacobiScreen> {
           }
           return sum - b[i];
         });
-        double residualNorm = sqrt(residual.map((val) => val * val).reduce((a, b) => a + b));
+        double residualNorm =
+            sqrt(residual.map((val) => val * val).reduce((a, b) => a + b));
 
         return [xNext, residual, residualNorm];
       }
@@ -216,7 +230,6 @@ class _JacobiScreenState extends State<JacobiScreen> {
 
     throw Exception('Метод Якоби не сошелся за $maxIterations итераций.');
   }
-
 
   // Функция для обработки ввода и вызова метода Якоби
   void _calculateSolution() {
@@ -246,7 +259,8 @@ class _JacobiScreenState extends State<JacobiScreen> {
       List<List<double>> B = jacobiData['B'];
       List<double> d = jacobiData['d'];
 
-      List<dynamic> result = jacobiMethodCalc(A, b, B, d, tol: tol, maxIterations: maxIterations);
+      List<dynamic> result =
+          jacobiMethodCalc(A, b, B, d, tol: tol, maxIterations: maxIterations);
       calculateErrorVectors(result[0]);
 
       setState(() {
@@ -273,14 +287,23 @@ class _JacobiScreenState extends State<JacobiScreen> {
     int n = 4;
     Random random = Random();
 
-    List<List<double>> randomMatrix = List.generate(n, (i) =>
-        List.generate(n, (j) => random.nextDouble() * 20 - 10 + (i == j ? random.nextDouble() * 30 + 10 : 0)));
+    List<List<double>> randomMatrix = List.generate(
+        n,
+        (i) => List.generate(
+            n,
+            (j) =>
+                random.nextDouble() * 20 -
+                10 +
+                (i == j ? random.nextDouble() * 30 + 10 : 0)));
 
-    List<double> randomVector = List.generate(n, (i) => random.nextDouble() * 20 - 10);
+    List<double> randomVector =
+        List.generate(n, (i) => random.nextDouble() * 20 - 10);
 
-    String matrixString = randomMatrix.map((row) => row.map((e) => e.toStringAsFixed(2)).join(' ')).join('\n');
-    String vectorString = randomVector.map((e) => e.toStringAsFixed(2)).join(' ');
-
+    String matrixString = randomMatrix
+        .map((row) => row.map((e) => e.toStringAsFixed(2)).join(' '))
+        .join('\n');
+    String vectorString =
+        randomVector.map((e) => e.toStringAsFixed(2)).join(' ');
 
     setState(() {
       _matrixController.text = matrixString;
@@ -419,7 +442,6 @@ class _JacobiScreenState extends State<JacobiScreen> {
                 ),
               ),
             ),
-
           ],
         ),
       ),
