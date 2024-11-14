@@ -1,12 +1,16 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:intl/intl.dart';
-import 'package:numerical_analysis/somewidgets.dart';
+import 'package:numerical_analysis/output_page.dart';
+import 'package:numerical_analysis/some_widgets.dart';
 
 class FiniteElementScreen extends StatefulWidget {
-  const FiniteElementScreen({super.key});
+  final GlobalKey<OutputPageState> outputPageKey;
+
+  const FiniteElementScreen({super.key, required this.outputPageKey});
 
   @override
   FiniteElementScreenState createState() => FiniteElementScreenState();
@@ -24,9 +28,14 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
 
   double h = 0.05;
   double sliderValue = 20;
+  int jacobiStep = 10;
+  double jacobiHMax = 100;
 
-  void customPrint(String message, Function addToOutputField) {
-    addToOutputField(message);
+  void customPrint(String message) {
+    if (kDebugMode) {
+      print(message);
+    }
+    widget.outputPageKey.currentState!.addToOutputField(message);
   }
 
   double u(double x) {
@@ -84,10 +93,10 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
   }
 
   List<List<double>> calcAh(double h) {
-    print('b=$b, a=$a, h=$h');
+    customPrint('b=$b, a=$a, h=$h');
     int n = ((b - a) / h).floor();
-    print('n=$n');
     h = (b - a) / n;
+    customPrint('n=$n, h=$h');
 
     List<List<double>> a_1 =
         List.generate(n - 1, (_) => List.filled(n - 1, 0.0));
@@ -219,16 +228,18 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
   List<FlSpot> solutionPoints = [];
   List<FlSpot> uPoints = [];
   List<FlSpot> rPoints = [];
-  List<FlSpot> rPoints_log = [];
+  List<FlSpot> rPointsLog = [];
   List<FlSpot> rPoints2 = [];
 
-  void calculateSolution() {
+  Future<void> calculateSolution() async {
+    customPrint('Calculating solution for h = 1/$sliderValue');
+    h = 1 / sliderValue;
+    List<double> Uh = await findUh();
     setState(() {
+      h = 1 / sliderValue;
       solutionPoints = [];
       uPoints = [];
       rPoints2 = [];
-      h = 1 / sliderValue;
-      List<double> Uh = findUh();
       for (int i = 0; a + h * (i + 1) < b; i += 1) {
         double x = a + h * i;
         double solutionValue = 0;
@@ -243,12 +254,13 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     });
   }
 
-  List<double> findUh({bool useJacobi = false}) {
+  Future<List<double>> findUh({bool useJacobi = false}) {
     List<List<double>> Ah = calcAh(h);
     List<double> F = calcF(h);
     List<double> uH;
     DateTime currentTime = DateTime.now();
-    print('\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi=$useJacobi');
+    customPrint(
+        '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi=$useJacobi');
     if (useJacobi) {
       double tol = 1e-10;
       int maxIterations = 1000;
@@ -264,10 +276,17 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     }
     // current time
     DateTime currentTime2 = DateTime.now();
-    print('\t${DateFormat.Hms().format(currentTime2)} - Solved');
-    print('\tTook ${currentTime2.difference(currentTime).inSeconds} seconds');
+    customPrint('\t${DateFormat.Hms().format(currentTime2)} - Solved');
+    int secs = currentTime2.difference(currentTime).inSeconds;
+    if (secs > 1) {
+      customPrint(
+          '\tTook ${currentTime2.difference(currentTime).inSeconds} seconds');
+    } else {
+      customPrint(
+          '\tTook ${currentTime2.difference(currentTime).inMilliseconds} milliseconds');
+    }
 
-    return uH;
+    return Future.value(uH);
   }
 
   double euclideanNorm(List<double> xNew, List<double> x) {
@@ -280,27 +299,42 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     return sqrt(sumOfSquares);
   }
 
-  void calcRhJacobi() {
-    setState(() {
-      rPoints = [];
-      rPoints_log = [];
-      for (int i = 10; i < 251; i += 10) {
-        h = 1 / (i as double);
-        print('h = 1/$i');
-        List<double> uH = [0.0] + findUh(useJacobi: true);
-        List<double> uOrig = [];
-        for (int i = 0; a + h * (i + 1) < b; i += 1) {
-          double x = a + h * i;
-          double uValue = u(x);
-          uOrig.add(uValue);
-        }
-        double uNorm = sqrt(h) * euclideanNorm(uOrig, uH);
-        double uNormLog = log(uNorm).toDouble() / ln10;
-        print('sqrt(h) * |u - uh| = $uNorm\nlog=$uNormLog\n========\n');
-        rPoints.add(FlSpot(i as double, uNorm));
-        rPoints_log.add(FlSpot(i as double, uNormLog));
+  Future<void> calcRhJacobi() async {
+    // Prepare the calculations outside of setState
+    List<FlSpot> newRPoints = [];
+    List<FlSpot> newRPointsLog = [];
+
+    for (int i = 10; i <= jacobiHMax; i += jacobiStep) {
+      h = (1 / i);
+      customPrint('h = 1/$i');
+      List<double> uH = [0.0] + await findUh(useJacobi: true);
+      List<double> uOrig = [];
+
+      for (int j = 0; a + h * (j + 1) < b; j += 1) {
+        double x = a + h * j;
+        double uValue = u(x);
+        uOrig.add(uValue);
       }
+
+      double uNorm = sqrt(h) * euclideanNorm(uOrig, uH);
+      double uNormLog = log(uNorm) / ln10;
+
+      customPrint('sqrt(h) * |u - uh| = $uNorm\nlog=$uNormLog\n\n========\n');
+
+      // Collect results
+      newRPoints.add(FlSpot(i.toDouble(), uNorm));
+      newRPointsLog.add(FlSpot(i.toDouble(), uNormLog));
+    }
+
+    // Use setState only to update the UI
+    setState(() {
+      rPoints = newRPoints;
+      rPointsLog = newRPointsLog;
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text("Расчёт Якоби завершён"),
+    ));
   }
 
   @override
@@ -316,10 +350,11 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Значения для задачи:'),
+              Text('· N = $N'),
+              Text('· K = $K'),
               const SizedBox(height: 10),
-              Text('N = $N'),
-              Text('K = $K'),
-              Text('Границы:\n\ta = $a\n\tb = $b'),
+              Text('Границы:\n· a = $a\n· b = $b'),
+              const SizedBox(height: 10),
               Text('h = 1/$sliderValue = $h'),
               Slider(
                 value: sliderValue,
@@ -332,113 +367,100 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
                     h = 1 / sliderValue;
                   });
                 },
-                onChangeEnd: (newValue) {
-                  calculateSolution();
+                onChangeEnd: (newValue) async {
+                  await calculateSolution();
+                },
+              ),
+              Text('jacobiHMax = $jacobiHMax'),
+              Slider(
+                value: jacobiHMax,
+                min: 100,
+                max: 1000,
+                divisions: (1000 - 100) ~/ 50,
+                onChanged: (newValue) {
+                  setState(() {
+                    jacobiHMax = newValue.toInt() + 0.0;
+                  });
                 },
               ),
               const SizedBox(height: 10),
               Center(
-                child: Math.tex(
-                  r'u(x) = \sin\left(\frac{\pi (x - a)}{b - a}\right) + \cos\left(\frac{2\pi (x - a)}{b - a}\right) - 1',
-                  textStyle: TextStyle(fontSize: 24),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Получаем ширину экрана
+                    double screenWidth = constraints.maxWidth;
+
+                    // Рассчитываем размер шрифта, который будет подходить для всей ширины экрана
+                    double fontSize =
+                        screenWidth / 30; // Например, на 10% от ширины экрана
+
+                    // Ограничиваем размер шрифта минимальным и максимальным значением
+                    fontSize = fontSize.clamp(16.0, 40.0);
+
+                    return Math.tex(
+                      r'u(x) = \sin\left(\frac{\pi (x - a)}{b - a}\right) + \cos\left(\frac{2\pi (x - a)}{b - a}\right) - 1',
+                      textStyle: TextStyle(fontSize: fontSize),
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 10),
               CustomElevatedButton(
                 label: 'Поиск Uh',
-                onPressed: calculateSolution,
+                onPressed: () async {
+                  await calculateSolution();
+                },
               ),
               CustomElevatedButton(
                 label: 'Поиск Uh (Якоби)',
-                onPressed: calcRhJacobi,
+                onPressed: () async {
+                  await calcRhJacobi();
+                },
               ),
               if (solutionPoints.isNotEmpty && uPoints.isNotEmpty) ...[
-                SizedBox(
-                  height: 200,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: LineChart(LineChartData(
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: solutionPoints,
-                          isCurved: true,
-                          color: Colors.blue,
-                          barWidth: 2,
-                          dotData: FlDotData(show: false),
-                        ),
-                      ],
-                    )),
-                  ),
+                Center(
+                    child: const Text('Оригинальная функция U:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 25))),
+                CustomChartWidget(
+                  points: uPoints,
+                  color: Colors.blue,
                 ),
-                SizedBox(
-                  height: 200,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: LineChart(LineChartData(
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: uPoints,
-                          isCurved: true,
-                          color: Colors.red,
-                          barWidth: 2,
-                          dotData: FlDotData(show: false),
-                        ),
-                      ],
-                    )),
-                  ),
+                Center(
+                    child: const Text('Найденная Uh:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 25))),
+                CustomChartWidget(
+                  points: solutionPoints,
+                  color: Colors.lightBlueAccent,
                 ),
-                SizedBox(
-                  height: 200,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: LineChart(LineChartData(
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: rPoints2,
-                          isCurved: true,
-                          color: Colors.green,
-                          barWidth: 2,
-                          dotData: FlDotData(show: false),
-                        ),
-                      ],
-                    )),
-                  ),
+                Center(
+                    child: const Text('Разница:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 25))),
+                CustomChartWidget(
+                  points: rPoints2,
+                  color: Colors.red,
                 ),
               ],
               if (rPoints.isNotEmpty) ...[
-                SizedBox(
-                  height: 200,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: LineChart(LineChartData(
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: rPoints,
-                          isCurved: true,
-                          color: Colors.green,
-                          barWidth: 2,
-                          dotData: FlDotData(show: true),
-                        ),
-                      ],
-                    )),
-                  ),
+                Center(
+                    child: const Text('r(h):',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 25))),
+                CustomChartWidget(
+                  points: rPoints,
+                  color: Colors.green,
+                  showDots: true,
                 ),
-                SizedBox(
-                  height: 200,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: LineChart(LineChartData(
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: rPoints_log,
-                          isCurved: true,
-                          color: Colors.green,
-                          barWidth: 2,
-                          dotData: FlDotData(show: true),
-                        ),
-                      ],
-                    )),
-                  ),
+                Center(
+                    child: const Text('r(h) в логарифмическом масштабе:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 25))),
+                CustomChartWidget(
+                  points: rPointsLog,
+                  color: Colors.green,
+                  showDots: true,
                 ),
               ]
             ],
