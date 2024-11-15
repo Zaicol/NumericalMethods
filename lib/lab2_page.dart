@@ -171,13 +171,12 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
         });
         double residualNorm =
             sqrt(residual.map((val) => val * val).reduce((a, b) => a + b));
-
-        return [xNext, residual, residualNorm];
+        customPrint('norm=$norm\tk=$k');
+        return [xNext, residual, residualNorm, norm];
       }
 
       x = List.from(xNext);
     }
-
     throw Exception('Метод Якоби не сошелся за $maxIterations итераций.');
   }
 
@@ -257,7 +256,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
   Future<List<double>> findUh({bool useJacobi = false}) {
     List<List<double>> Ah = calcAh(h);
     List<double> F = calcF(h);
-    List<double> uH;
+    List<double> uH = [0.0];
     DateTime currentTime = DateTime.now();
     customPrint(
         '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi=$useJacobi');
@@ -267,10 +266,14 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
       Map<String, dynamic> jacobiData = prepareJacobi(Ah, F);
       List<List<double>> B = jacobiData['B'];
       List<double> d = jacobiData['d'];
-
-      List<dynamic> result =
-          jacobiMethodCalc(Ah, F, B, d, tol: tol, maxIterations: maxIterations);
-      uH = result[0];
+      double norm = 1;
+      while (norm > tol) {
+        List<dynamic> result =
+        jacobiMethodCalc(Ah, F, B, d, tol: tol, maxIterations: maxIterations);
+        uH = result[0];
+        norm = result[3];
+        d = uH;
+      }
     } else {
       uH = solveLinearSystem(Ah, F);
     }
@@ -291,10 +294,18 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
 
   double euclideanNorm(List<double> xNew, List<double> x) {
     double sumOfSquares = 0.0;
+    double max_r = 0.0;
+    double powx;
 
     for (int i = 0; i < x.length; i++) {
-      sumOfSquares += pow(xNew[i] - x[i], 2);
+      powx = pow(xNew[i] - x[i], 2).toDouble();
+      sumOfSquares += powx;
+      if (powx > max_r) {
+        max_r = powx;
+      }
     }
+
+    customPrint('max pow = $max_r');
 
     return sqrt(sumOfSquares);
   }
@@ -322,8 +333,8 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
       customPrint('sqrt(h) * |u - uh| = $uNorm\nlog=$uNormLog\n\n========\n');
 
       // Collect results
-      newRPoints.add(FlSpot(i.toDouble(), uNorm));
-      newRPointsLog.add(FlSpot(i.toDouble(), uNormLog));
+      newRPoints.add(FlSpot(1/i.toDouble(), uNorm));
+      newRPointsLog.add(FlSpot(1/i.toDouble(), uNormLog));
     }
 
     // Use setState only to update the UI
@@ -374,9 +385,9 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
               Text('jacobiHMax = $jacobiHMax'),
               Slider(
                 value: jacobiHMax,
-                min: 100,
+                min: 50,
                 max: 1000,
-                divisions: (1000 - 100) ~/ 50,
+                divisions: (1000 - 50) ~/ 50,
                 onChanged: (newValue) {
                   setState(() {
                     jacobiHMax = newValue.toInt() + 0.0;
