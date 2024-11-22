@@ -180,14 +180,6 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     throw Exception('Метод Якоби не сошелся за $maxIterations итераций.');
   }
 
-  double norm(List<double> a, List<double> b) {
-    double sum = 0.0;
-    for (int i = 0; i < a.length; i++) {
-      sum += pow(a[i] - b[i], 2);
-    }
-    return sqrt(sum);
-  }
-
   List<double> solveLinearSystem(List<List<double>> A, List<double> b) {
     int n = A.length;
 
@@ -230,7 +222,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
   List<FlSpot> rPointsLog = [];
   List<FlSpot> rPoints2 = [];
 
-  Future<void> calculateSolution() async {
+  Future<void> calculateSingleSolution() async {
     customPrint('Calculating solution for h = 1/$sliderValue');
     h = 1 / sliderValue;
     List<double> Uh = await findUh();
@@ -310,7 +302,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     return sqrt(sumOfSquares);
   }
 
-  Future<void> calcRhJacobi() async {
+  Future<void> calculateJacobiSolution() async {
     // Prepare the calculations outside of setState
     List<FlSpot> newRPoints = [];
     List<FlSpot> newRPointsLog = [];
@@ -379,7 +371,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
                   });
                 },
                 onChangeEnd: (newValue) async {
-                  await calculateSolution();
+                  await calculateSingleSolution();
                 },
               ),
               Text('jacobiHMax = $jacobiHMax'),
@@ -419,13 +411,13 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
               CustomElevatedButton(
                 label: 'Поиск Uh',
                 onPressed: () async {
-                  await calculateSolution();
+                  await calculateSingleSolution();
                 },
               ),
               CustomElevatedButton(
                 label: 'Поиск Uh (Якоби)',
                 onPressed: () async {
-                  await calcRhJacobi();
+                  await calculateJacobiSolution();
                 },
               ),
               if (solutionPoints.isNotEmpty && uPoints.isNotEmpty) ...[

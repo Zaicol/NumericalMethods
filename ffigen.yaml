@@ -1,0 +1,8 @@
+llvm-path: "C:/Program Files/LLVM/bin"
+headers:
+  entry-points:
+    - 'android/app/src/main/cpp/JacobiSolver_c.h'
+  headers:
+    include-directories:
+      - "android/app/src/main/cpp/"
+      - "android/app/src/main/"
