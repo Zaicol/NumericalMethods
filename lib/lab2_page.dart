@@ -245,28 +245,105 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     });
   }
 
+  // Заменяем метод Якоби на метод CG
+  List<double> conjugateGradientMethod(List<List<double>> A, List<double> b,
+      {double tol = 1e-10, int maxIterations = 1000}) {
+    int n = A.length;
+    List<double> x = List.filled(n, 0.0);
+    List<double> r = List.from(b);
+    List<double> p = List.from(r);
+    double rsOld = r.fold(0.0, (sum, val) => sum + val * val);
+
+    for (int k = 0; k < maxIterations; k++) {
+      List<double> Ap = List.filled(n, 0.0);
+      for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+          Ap[i] += A[i][j] * p[j];
+        }
+      }
+      double alpha = rsOld /
+          p.asMap().entries.fold(
+              0.0, (sum, entry) => sum + entry.value * Ap[entry.key]);
+      for (int i = 0; i < n; i++) {
+        x[i] += alpha * p[i];
+        r[i] -= alpha * Ap[i];
+      }
+      double rsNew = r.fold(0.0, (sum, val) => sum + val * val);
+      if (sqrt(rsNew) < tol) {
+        break;
+      }
+      for (int i = 0; i < n; i++) {
+        p[i] = r[i] + (rsNew / rsOld) * p[i];
+      }
+      rsOld = rsNew;
+    }
+
+    return x;
+  }
+
+  List<double> conjugateGradient2(List<List<double>> A, List<double> b) {
+    int n = b.length;
+    List<double> x = List.filled(n, 0.0);
+    List<double> r = List.generate(n, (i) => b[i]);
+    List<double> z = List.from(r);
+    double eps = 1e-10;
+
+    while (true) {
+      List<double> w = List.filled(n, 0.0);
+      for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+          w[i] += A[i][j] * z[j];
+        }
+      }
+
+      double rsq = r.map((ri) => ri * ri).reduce((a, b) => a + b);
+      double az = w.asMap().entries.map((e) => e.value * z[e.key]).reduce((a, b) => a + b);
+      double alpha = rsq / az;
+
+      for (int i = 0; i < n; i++) {
+        x[i] += alpha * z[i];
+      }
+
+      List<double> r1 = List.generate(n, (i) => r[i] - alpha * w[i]);
+      double rsqNew = r1.map((ri) => ri * ri).reduce((a, b) => a + b);
+
+      if (sqrt(rsqNew) < eps) break;
+
+      double beta = rsqNew / rsq;
+      for (int i = 0; i < n; i++) {
+        z[i] = r1[i] + beta * z[i];
+      }
+
+      r = r1;
+    }
+
+    return x;
+  }
+
+
   Future<List<double>> findUh({bool useJacobi = false}) {
     List<List<double>> Ah = calcAh(h);
     List<double> F = calcF(h);
     List<double> uH = [0.0];
     DateTime currentTime = DateTime.now();
     customPrint(
-        '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi=$useJacobi');
+        '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, CG=$useJacobi');
     if (useJacobi) {
-      double tol = 1e-10;
-      int maxIterations = 1000;
-      Map<String, dynamic> jacobiData = prepareJacobi(Ah, F);
-      List<List<double>> B = jacobiData['B'];
-      List<double> d = jacobiData['d'];
-      double norm = 1;
-      while (norm > tol) {
-        List<dynamic> result =
-        jacobiMethodCalc(Ah, F, B, d, tol: tol, maxIterations: maxIterations);
-        uH = result[0];
-        norm = result[3];
-        customPrint(norm.toString());
-        d = uH;
-      }
+      // double tol = 1e-10;
+      // int maxIterations = 1000;
+      // Map<String, dynamic> jacobiData = prepareJacobi(Ah, F);
+      // List<List<double>> B = jacobiData['B'];
+      // List<double> d = jacobiData['d'];
+      // double norm = 1;
+      // while (norm > tol) {
+      //   List<dynamic> result =
+      //   jacobiMethodCalc(Ah, F, B, d, tol: tol, maxIterations: maxIterations);
+      //   uH = result[0];
+      //   norm = result[3];
+      //   customPrint(norm.toString());
+      //   d = uH;
+      // }
+      uH = conjugateGradient2(Ah, F);
     } else {
       uH = solveLinearSystem(Ah, F);
     }
