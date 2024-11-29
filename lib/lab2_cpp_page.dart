@@ -6,17 +6,39 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:intl/intl.dart';
 import 'package:numerical_analysis/output_page.dart';
 import 'package:numerical_analysis/some_widgets.dart';
+import 'dart:ffi';
+import 'package:ffi/ffi.dart';
+import 'bindings.dart';
 
-class FiniteElementScreen extends StatefulWidget {
+final nativeLibrary = DynamicLibrary.open('Jacobi.dll'); // Update with the actual path
+
+// Define FFI bindings
+typedef SolveJacobiC = Pointer<Result> Function(
+    Pointer<Pointer<Double>> A, Pointer<Double> b, Int32 n, Double tol, Int32 maxIterations);
+typedef SolveJacobiDart = Pointer<Result> Function(
+    Pointer<Pointer<Double>> A, Pointer<Double> b, int n, double tol, int maxIterations);
+
+final solveJacobi = nativeLibrary
+    .lookup<NativeFunction<SolveJacobiC>>('solveJacobi')
+    .asFunction<SolveJacobiDart>();
+
+typedef FreeResultC = Void Function(Pointer<Result>);
+typedef FreeResultDart = void Function(Pointer<Result>);
+
+final freeResult = nativeLibrary
+    .lookup<NativeFunction<FreeResultC>>('freeResult')
+    .asFunction<FreeResultDart>();
+
+class FiniteElementCPPScreen extends StatefulWidget {
   final GlobalKey<OutputPageState> outputPageKey;
 
-  const FiniteElementScreen({super.key, required this.outputPageKey});
+  const FiniteElementCPPScreen({super.key, required this.outputPageKey});
 
   @override
-  FiniteElementScreenState createState() => FiniteElementScreenState();
+  FiniteElementCPPScreenState createState() => FiniteElementCPPScreenState();
 }
 
-class FiniteElementScreenState extends State<FiniteElementScreen> {
+class FiniteElementCPPScreenState extends State<FiniteElementCPPScreen> {
   static const N = 1;
   static const K = 74;
 
@@ -29,7 +51,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
   double h = 0.05;
   double sliderValue = 20;
   int jacobiStep = 10;
-  double jacobiHMax = 100;
+  double jacobiHMax = 10;
 
   void customPrint(String message) {
     if (kDebugMode) {
@@ -125,161 +147,81 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
         n - 1, (i) => List.generate(n - 1, (j) => a_1[i][j] + a_2[i][j]));
   }
 
-  Map<String, dynamic> prepareJacobi(List<List<double>> A, List<double> b) {
-    int n = A.length;
-
-    List<double> dInv = List.generate(n, (i) => 1 / A[i][i]);
-    List<List<double>> R = List.generate(
-        n, (i) => List.generate(n, (j) => i != j ? A[i][j] : 0.0));
-
-    List<List<double>> B =
-        List.generate(n, (i) => List.generate(n, (j) => -dInv[i] * R[i][j]));
-
-    List<double> d = List.generate(n, (i) => dInv[i] * b[i]);
-
-    return {'B': B, 'd': d};
-  }
-
-  List<dynamic> jacobiMethodCalc(List<List<double>> A, List<double> b,
-      List<List<double>> B, List<double> d,
-      {double tol = 0, int maxIterations = 1000}) {
-    int n = B.length;
-    List<double> x = List.filled(n, 0.0);
-    List<double> xNext = List.filled(n, 0.0);
-
-    for (int k = 0; k < maxIterations; k++) {
-      for (int i = 0; i < n; i++) {
-        double sum = 0.0;
-        for (int j = 0; j < n; j++) {
-          sum += B[i][j] * x[j];
-        }
-        xNext[i] = sum + d[i];
-      }
-
-      double norm = 0.0;
-      for (int i = 0; i < n; i++) {
-        norm = max(norm, (xNext[i] - x[i]).abs());
-      }
-
-      if ((norm < tol && tol != 0) || k + 1 == maxIterations) {
-        List<double> residual = List.generate(n, (i) {
-          double sum = 0.0;
-          for (int j = 0; j < n; j++) {
-            sum += A[i][j] * xNext[j];
-          }
-          return sum - b[i];
-        });
-        double residualNorm =
-            sqrt(residual.map((val) => val * val).reduce((a, b) => a + b));
-        customPrint('norm=$norm\tk=$k');
-        return [xNext, residual, residualNorm, norm];
-      }
-
-      x = List.from(xNext);
-    }
-    throw Exception('Метод Якоби не сошелся за $maxIterations итераций.');
-  }
-
-  List<double> solveLinearSystem(List<List<double>> A, List<double> b) {
-    int n = A.length;
-
-    // Augment matrix A with vector b
-    List<List<double>> augmentedMatrix =
-        List.generate(n, (i) => [...A[i], b[i]]);
-
-    // Forward elimination
-    for (int i = 0; i < n; i++) {
-      // Make the diagonal element 1 and adjust the rest of the row
-      double diagValue = augmentedMatrix[i][i];
-      for (int j = 0; j <= n; j++) {
-        augmentedMatrix[i][j] /= diagValue;
-      }
-
-      // Eliminate column below
-      for (int k = i + 1; k < n; k++) {
-        double factor = augmentedMatrix[k][i];
-        for (int j = 0; j <= n; j++) {
-          augmentedMatrix[k][j] -= factor * augmentedMatrix[i][j];
-        }
-      }
-    }
-
-    // Back substitution
-    List<double> x = List.filled(n, 0.0);
-    for (int i = n - 1; i >= 0; i--) {
-      x[i] = augmentedMatrix[i][n];
-      for (int j = i + 1; j < n; j++) {
-        x[i] -= augmentedMatrix[i][j] * x[j];
-      }
-    }
-
-    return x;
-  }
-
-  List<FlSpot> solutionPoints = [];
-  List<FlSpot> uPoints = [];
   List<FlSpot> rPoints = [];
   List<FlSpot> rPointsLog = [];
-  List<FlSpot> rPoints2 = [];
 
-  Future<void> calculateSingleSolution() async {
-    customPrint('Calculating solution for h = 1/$sliderValue');
-    h = 1 / sliderValue;
-    List<double> Uh = await findUh();
-    setState(() {
-      h = 1 / sliderValue;
-      solutionPoints = [];
-      uPoints = [];
-      rPoints2 = [];
-      for (int i = 0; a + h * (i + 1) < b; i += 1) {
-        double x = a + h * i;
-        double solutionValue = 0;
-        if (0 < i && i - 1 < Uh.length) {
-          solutionValue = Uh[i - 1];
-        }
-        double uValue = u(x);
-        solutionPoints.add(FlSpot(x, solutionValue));
-        uPoints.add(FlSpot(x, uValue));
-        rPoints2.add(FlSpot(x, uValue - solutionValue));
-      }
-    });
-  }
-
-  Future<List<double>> findUh({bool useJacobi = false}) {
+  Future<List<double>> findUh() {
     List<List<double>> Ah = calcAh(h);
     List<double> F = calcF(h);
     List<double> uH = [0.0];
+
     DateTime currentTime = DateTime.now();
     customPrint(
-        '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi=$useJacobi');
-    if (useJacobi) {
-      double tol = 1e-10;
-      int maxIterations = 1000;
-      Map<String, dynamic> jacobiData = prepareJacobi(Ah, F);
-      List<List<double>> B = jacobiData['B'];
-      List<double> d = jacobiData['d'];
-      double norm = 1;
-      while (norm > tol) {
-        List<dynamic> result =
-        jacobiMethodCalc(Ah, F, B, d, tol: tol, maxIterations: maxIterations);
-        uH = result[0];
-        norm = result[3];
-        customPrint(norm.toString());
-        d = uH;
+        '\t${DateFormat.Hms().format(currentTime)} - Solving for h=$h, Jacobi');
+
+    double tol = 1e-10;
+    int maxIterations = 1000;
+
+    // Prepare input data for FFI
+    final int n = Ah.length;
+    final allocator = malloc;
+
+    // Allocate memory for matrix Ah
+    customPrint('\tAllocating memory for matrix Ah');
+    Pointer<Pointer<Double>> aPtr = allocator.allocate<Pointer<Double>>(n);
+    for (int i = 0; i < n; i++) {
+      Pointer<Double> rowPtr = allocator.allocate<Double>(n);
+      for (int j = 0; j < n; j++) {
+        rowPtr[j] = Ah[i][j];
       }
-    } else {
-      uH = solveLinearSystem(Ah, F);
+      aPtr[i] = rowPtr;
     }
+
+    // Allocate memory for vector F
+    customPrint('\tAllocating memory for vector F');
+    Pointer<Double> bPtr;
+    customPrint('\tTrying to allocate memory for vector F');
+    customPrint('n=$n');
+    customPrint('F=${F.join(', ')}');
+
+    try {
+      bPtr = allocator.allocate<Double>(n);
+      for (int i = 0; i < n; i++) {
+        bPtr[i] = F[i];
+      }
+    } catch (e) {
+      allocator.free(aPtr);
+      customPrint(e.toString());
+      rethrow;
+    }
+
+    // Call the native C++ function
+    customPrint('\tCalling native C++ function');
+    Pointer<Result> resultPtr = solveJacobi(aPtr, bPtr, n, tol, maxIterations);
+
+    // Extract the result from the returned pointer
+    List<double> xNext = List.generate(n, (i) => resultPtr.ref.xNext[i]);
+    uH = xNext;
+
+    // Free allocated memory
+    freeResult(resultPtr);
+    for (int i = 0; i < n; i++) {
+      allocator.free(aPtr[i]);
+    }
+    allocator.free(aPtr);
+    allocator.free(bPtr);
+
     // current time
     DateTime currentTime2 = DateTime.now();
     customPrint('\t${DateFormat.Hms().format(currentTime2)} - Solved');
     int secs = currentTime2.difference(currentTime).inSeconds;
+    Duration diff = currentTime2.difference(currentTime);
     if (secs > 1) {
       customPrint(
-          '\tTook ${currentTime2.difference(currentTime).inSeconds} seconds');
+          '\tTook ${diff.inSeconds} seconds');
     } else {
       customPrint(
-          '\tTook ${currentTime2.difference(currentTime).inMilliseconds} milliseconds');
+          '\tTook ${diff.inMilliseconds} milliseconds');
     }
 
     return Future.value(uH);
@@ -311,7 +253,7 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
     for (int i = 10; i <= jacobiHMax; i += jacobiStep) {
       h = (1 / i);
       customPrint('h = 1/$i');
-      List<double> uH = [0.0] + await findUh(useJacobi: true);
+      List<double> uH = [0.0] + await findUh();
       List<double> uOrig = [];
 
       for (int j = 0; a + h * (j + 1) < b; j += 1) {
@@ -359,28 +301,12 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
               const SizedBox(height: 10),
               Text('Границы:\n· a = $a\n· b = $b'),
               const SizedBox(height: 10),
-              Text('h = 1/$sliderValue = $h'),
-              Slider(
-                value: sliderValue,
-                min: 1,
-                max: 1000,
-                divisions: 100,
-                onChanged: (newValue) {
-                  setState(() {
-                    sliderValue = newValue.toInt() + 0.0;
-                    h = 1 / sliderValue;
-                  });
-                },
-                onChangeEnd: (newValue) async {
-                  await calculateSingleSolution();
-                },
-              ),
               Text('jacobiHMax = $jacobiHMax'),
               Slider(
                 value: jacobiHMax,
-                min: 50,
+                min: 10,
                 max: 1000,
-                divisions: (1000 - 50) ~/ 50,
+                divisions: (1000 - 10) ~/ 10,
                 onChanged: (newValue) {
                   setState(() {
                     jacobiHMax = newValue.toInt() + 0.0;
@@ -410,43 +336,12 @@ class FiniteElementScreenState extends State<FiniteElementScreen> {
               ),
               const SizedBox(height: 10),
               CustomElevatedButton(
-                label: 'Поиск Uh',
-                onPressed: () async {
-                  await calculateSingleSolution();
-                },
-              ),
-              CustomElevatedButton(
                 label: 'Поиск Uh (Якоби)',
                 onPressed: () async {
                   await calculateJacobiSolution();
                 },
               ),
-              if (solutionPoints.isNotEmpty && uPoints.isNotEmpty) ...[
-                Center(
-                    child: const Text('Оригинальная функция U:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 25))),
-                CustomChartWidget(
-                  points: uPoints,
-                  color: Colors.blue,
-                ),
-                Center(
-                    child: const Text('Найденная Uh:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 25))),
-                CustomChartWidget(
-                  points: solutionPoints,
-                  color: Colors.lightBlueAccent,
-                ),
-                Center(
-                    child: const Text('Разница:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 25))),
-                CustomChartWidget(
-                  points: rPoints2,
-                  color: Colors.red,
-                ),
-              ],
+
               if (rPoints.isNotEmpty) ...[
                 Center(
                     child: const Text('r(h):',
